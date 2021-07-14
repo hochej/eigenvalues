@@ -5,41 +5,43 @@
  */
 
 use nalgebra as na;
-
+use ndarray::prelude::*;
+use ndarray_rand::RandomExt;
+use ndarray_rand::rand_distr::Uniform;
+use std::iter::FromIterator;
 use approx::relative_eq;
 use na::linalg::SymmetricEigen;
 use na::Dynamic;
 use na::{DMatrix, DVector};
 
 /// Generate a random highly diagonal symmetric matrix
-pub fn generate_diagonal_dominant(dim: usize, sparsity: f64) -> DMatrix<f64> {
+pub fn generate_diagonal_dominant(dim: usize, sparsity: f64) -> Array2<f64> {
     let xs = 1..=dim;
     let it = xs.map(|x: usize| x as f64);
-    let vs = DVector::<f64>::from_iterator(dim, it);
-    let mut arr = DMatrix::<f64>::new_random(dim, dim);
-    arr += &arr.transpose();
+    let mut arr = Array::random((dim, dim), Uniform::new(0., 1.));
+    arr += &arr.t();
     arr *= sparsity;
-    arr.set_diagonal(&vs);
+    arr.diag_mut().assign(&Array::from_iter(it));
     arr
 }
 
 /// Random symmetric matrix
-pub fn generate_random_symmetric(dim: usize, magnitude: f64) -> DMatrix<f64> {
-    let arr = DMatrix::<f64>::new_random(dim, dim) * magnitude;
+pub fn generate_random_symmetric(dim: usize, magnitude: f64) -> Array2<f64> {
+    let arr = Array::random((dim, dim), Uniform::new(0., 1.)) * magnitude;
     &arr * arr.transpose()
 }
 
 /// Random Sparse matrix
-pub fn generate_random_sparse_symmetric(dim: usize, lim: usize, sparsity: f64) -> DMatrix<f64> {
+pub fn generate_random_sparse_symmetric(dim: usize, lim: usize, sparsity: f64) -> Array2<f64> {
     let arr = generate_diagonal_dominant(dim, sparsity);
-    let lambda = |i, j| {
+    let lambda = |(i, j)| {
         if j > i + lim && i > j + lim {
             0.0
         } else {
-            arr[(i, j)]
+            arr[[i, j]]
         }
     };
-    DMatrix::<f64>::from_fn(dim, dim, lambda)
+    Array::from_shape_fn((dim, dim), lambda)
 }
 
 /// Sort the eigenvalues and their corresponding eigenvectors in ascending order
@@ -109,7 +111,7 @@ pub fn test_eigenpairs(
 
 #[cfg(test)]
 mod test {
-    use nalgebra as na;
+    use ndarray::prelude::*;
     use std::f64;
 
     #[test]
@@ -123,7 +125,7 @@ mod test {
         test_symmetric(matrix);
     }
 
-    fn test_symmetric(matrix: na::DMatrix<f64>) {
+    fn test_symmetric(matrix: Array2<f64>) {
         let rs = &matrix - &matrix.transpose();
         assert!(rs.sum() < f64::EPSILON);
     }

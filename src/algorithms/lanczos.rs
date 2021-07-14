@@ -7,8 +7,11 @@ eigenvalues of an hermitian matrix using a [Krylov subspace](https://en.wikipedi
 
 */
 use super::SpectrumTarget;
-use crate::matrix_operations::MatrixOperations;
 use crate::utils;
+use ndarray::prelude::*;
+use ndarray_rand::RandomExt;
+use ndarray_rand::rand_distr::Uniform;
+use ndarray_linalg::norm;
 use nalgebra::linalg::SymmetricEigen;
 use nalgebra::{DMatrix, DVector};
 use std::error;
@@ -26,8 +29,8 @@ impl fmt::Display for LanczosError {
 impl error::Error for LanczosError {}
 
 pub struct HermitianLanczos {
-    pub eigenvalues: DVector<f64>,
-    pub eigenvectors: DMatrix<f64>,
+    pub eigenvalues: Array1<f64>,
+    pub eigenvectors: Array2<f64>,
 }
 
 impl HermitianLanczos {
@@ -36,28 +39,28 @@ impl HermitianLanczos {
     /// * `maximum_iterations` - Krylov subspace size
     /// * `spectrum_target` Lowest or Highest part of the spectrum
 
-    pub fn new<M: MatrixOperations>(
-        h: M,
+    pub fn new(
+        h: ArrayView2<f64>,
         maximum_iterations: usize,
         spectrum_target: SpectrumTarget,
     ) -> Result<Self, LanczosError> {
         let tolerance = 1e-8;
 
         // Off-diagonal elements
-        let mut betas = DVector::<f64>::zeros(maximum_iterations - 1);
+        let mut betas: Array1<f64> = Array1::zeros([maximum_iterations - 1]);
         // Diagonal elements
-        let mut alphas: DVector<f64> = DVector::<f64>::zeros(maximum_iterations);
+        let mut alphas: Array1<f64> = Array1::zeros([maximum_iterations]);
 
         // Matrix with the orthognal vectors
-        let mut vs = DMatrix::<f64>::zeros(h.nrows(), maximum_iterations);
+        let mut vs: Array2<f64> = Array2::zeros([h.nrows(), maximum_iterations]);
 
         // Initial vector
-        let xs = DVector::<f64>::new_random(h.nrows()).normalize();
-        vs.set_column(0, &xs);
+        let xs: Array1<f64> = norm::normalize(Array1::random((h.nrows()), Uniform::new(0.0, 1.0)));
+        vs.slice_mut(s![.., 0]).assign(&xs);
 
         // Compute the elements of the tridiagonal matrix
         for i in 0..maximum_iterations {
-            let tmp: DVector<f64> = h.matrix_vector_prod(vs.column(i));
+            let tmp: Array1<f64> = h.dot(vs.column(i));
             alphas[i] = tmp.dot(&vs.column(i));
             let mut tmp = {
                 if i == 0 {
@@ -82,7 +85,7 @@ impl HermitianLanczos {
                 }
             }
         }
-        let tridiagonal = Self::construct_tridiagonal(&alphas, &betas);
+        let tridiagonal = Self::construct_tridiagonal(alphas.view(), betas.view());
         let ord_sort = !matches!(spectrum_target, SpectrumTarget::Highest);
         let eig = utils::sort_eigenpairs(SymmetricEigen::new(tridiagonal), ord_sort);
         let eigenvalues = eig.eigenvalues;
@@ -94,9 +97,9 @@ impl HermitianLanczos {
         })
     }
 
-    fn construct_tridiagonal(alphas: &DVector<f64>, betas: &DVector<f64>) -> DMatrix<f64> {
+    fn construct_tridiagonal(alphas: ArrayView1<f64>, betas: ArrayView1<f64>) -> Array2<f64> {
         let dim = alphas.len();
-        let lambda = |i, j| {
+        let lambda = |(i, j)| {
             if i == j {
                 alphas[i]
             } else if i == j + 1 {
@@ -107,6 +110,6 @@ impl HermitianLanczos {
                 0.0
             }
         };
-        DMatrix::<f64>::from_fn(dim, dim, lambda)
+        Array::from_shape_fn((dim, dim), lambda)
     }
 }

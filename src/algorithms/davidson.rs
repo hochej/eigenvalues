@@ -19,9 +19,10 @@ Available correction methods are:
 */
 
 use super::{DavidsonCorrection, SpectrumTarget};
-use crate::matrix_operations::MatrixOperations;
 use crate::utils;
 use crate::MGS;
+use ndarray::prelude::*;
+//use ndarray_linalg::prelude::*;
 use nalgebra::linalg::SymmetricEigen;
 use nalgebra::{DMatrix, DVector, Dynamic};
 use std::error;
@@ -92,8 +93,8 @@ impl Davidson {
     /// * `method` Either DPR or GJD
     /// * `spectrum_target` Lowest or Highest part of the spectrum
     /// * `tolerance` numerical tolerance.
-    pub fn new<M: MatrixOperations>(
-        h: M,
+    pub fn new(
+        h: ArrayView2<f64>,
         nvalues: usize,
         method: DavidsonCorrection,
         spectrum_target: SpectrumTarget,
@@ -105,15 +106,15 @@ impl Davidson {
         // Initial subpace
         let mut dim_sub = conf.init_dim;
         // 1.1 Select the initial ortogonal subspace
-        let mut basis = Self::generate_subspace(&h.diagonal(), &conf);
+        let mut basis = Self::generate_subspace(&h.diag(), &conf);
 
         // 1.2 Select the correction to use
         let corrector = CorrectionMethod::<M>::new(&h, conf.method);
 
         // 2. Generate subpace matrix problem by projecting into the basis
         let first_subspace = basis.columns(0, dim_sub);
-        let mut matrix_subspace = h.matrix_matrix_prod(first_subspace);
-        let mut matrix_proj = first_subspace.transpose() * &matrix_subspace;
+        let mut matrix_subspace = h.dot(&first_subspace);
+        let mut matrix_proj = first_subspace.t() * &matrix_subspace;
 
         // Outer loop block Davidson schema
         let mut result = Err(DavidsonError);
@@ -128,11 +129,10 @@ impl Davidson {
             let residues = Self::compute_residues(&ritz_vectors, &matrix_subspace, &eig);
 
             // 4.2 Check Converge for each pair eigenvalue/eigenvector
-            let errors = DVector::<f64>::from_iterator(
-                nvalues,
+            let errors = Array::from_iter(
                 residues
-                    .columns(0, nvalues)
-                    .column_iter()
+                    .slice(.., 0..nvalues)
+                    .columns()
                     .map(|col| col.norm()),
             );
             // 4.3 Check if all eigenvalues/eigenvectors have converged
@@ -200,8 +200,8 @@ impl Davidson {
 
     /// Extract the requested eigenvalues/eigenvectors pairs
     fn create_results(
-        subspace_eigenvalues: &DVector<f64>,
-        ritz_vectors: &DMatrix<f64>,
+        subspace_eigenvalues: ArrayView1<f64>,
+        ritz_vectors: ArrayView2<f64>,
         nvalues: usize,
     ) -> Davidson {
         let eigenvectors = DMatrix::<f64>::from_iterator(
@@ -209,8 +209,7 @@ impl Davidson {
             nvalues,
             ritz_vectors.columns(0, nvalues).iter().cloned(),
         );
-        let eigenvalues = DVector::<f64>::from_iterator(
-            nvalues,
+        let eigenvalues = Array::from_iter(
             subspace_eigenvalues.rows(0, nvalues).iter().cloned(),
         );
         Davidson {
@@ -221,10 +220,10 @@ impl Davidson {
 
     /// Residue vectors
     fn compute_residues(
-        ritz_vectors: &DMatrix<f64>,
-        matrix_subspace: &DMatrix<f64>,
+        ritz_vectors: ArrayView2<f64>,
+        matrix_subspace: ArrayView2<f64>,
         eig: &SymmetricEigen<f64, Dynamic>,
-    ) -> DMatrix<f64> {
+    ) -> Array2<f64> {
         let dim_sub = eig.eigenvalues.nrows();
         let lambda = {
             let mut tmp = DMatrix::<f64>::zeros(dim_sub, dim_sub);
@@ -237,7 +236,7 @@ impl Davidson {
     }
 
     /// Generate initial orthonormal subspace
-    fn generate_subspace(diag: &DVector<f64>, conf: &Config) -> DMatrix<f64> {
+    fn generate_subspace(diag: ArrayView1<f64>, conf: &Config) -> Array2<f64> {
         if is_sorted(diag) && conf.spectrum_target == SpectrumTarget::Lowest {
             DMatrix::<f64>::identity(diag.nrows(), conf.max_search_space)
         } else {
@@ -246,13 +245,13 @@ impl Davidson {
 
             // update the matrix according to the spectrumtarget
             sort_diagonal(&mut rs, &conf);
-            let mut mtx = DMatrix::<f64>::zeros(diag.nrows(), conf.max_search_space);
+            let mut mtx = Array2::zeros([diag.nrows(), conf.max_search_space]);
             for i in 0..conf.max_search_space {
                 let index = rs
                     .iter()
                     .position(|&x| (x - xs[i]).abs() < f64::EPSILON)
                     .unwrap();
-                mtx[(i, index)] = 1.0;
+                mtx[[i, index]] = 1.0;
             }
             mtx
         }
@@ -260,31 +259,27 @@ impl Davidson {
 }
 
 /// Structure containing the correction methods
-struct CorrectionMethod<'a, M>
-where
-    M: MatrixOperations,
+struct CorrectionMethod
 {
     /// The initial target matrix
-    target: &'a M,
+    target: ArrayView2<f64>
     /// Method used to compute the correction
     method: DavidsonCorrection,
 }
 
-impl<'a, M> CorrectionMethod<'a, M>
-where
-    M: MatrixOperations,
+impl CorrectionMethod
 {
-    fn new(target: &'a M, method: DavidsonCorrection) -> CorrectionMethod<'a, M> {
-        CorrectionMethod { target, method }
+    fn new(target: ArrayView2<f64>, method: DavidsonCorrection) -> Self {
+        Self { target, method }
     }
 
     /// compute the correction vectors using either DPR or GJD
     fn compute_correction(
         &self,
-        residues: DMatrix<f64>,
-        eigenvalues: &DVector<f64>,
-        ritz_vectors: &DMatrix<f64>,
-    ) -> DMatrix<f64> {
+        residues: ArrayView2<f64>,
+        eigenvalues: ArrayView1<f64>,
+        ritz_vectors: ArrayView2<f64>,
+    ) -> Array2<f64> {
         match self.method {
             DavidsonCorrection::DPR => self.compute_dpr_correction(residues, eigenvalues),
             DavidsonCorrection::GJD => {
@@ -296,15 +291,15 @@ where
     /// Use the Diagonal-Preconditioned-Residue (DPR) method to compute the correction
     fn compute_dpr_correction(
         &self,
-        residues: DMatrix<f64>,
-        eigenvalues: &DVector<f64>,
-    ) -> DMatrix<f64> {
-        let d = self.target.diagonal();
-        let mut correction = DMatrix::<f64>::zeros(self.target.nrows(), residues.ncols());
+        residues: ArrayView2<f64>,
+        eigenvalues: ArrayView1<f64>,
+    ) -> Array2<f64> {
+        let d = self.target.diag();
+        let mut correction: Array2<f64> = Array::zeros((self.target.nrows(), residues.ncols()));
         for (k, lambda) in eigenvalues.iter().enumerate() {
             let tmp = DVector::<f64>::repeat(self.target.nrows(), *lambda) - &d;
             let rs = residues.column(k).component_div(&tmp);
-            correction.set_column(k, &rs);
+            correction.slice_mut(s![.., k]).assign(&rs);
         }
         correction
     }
@@ -312,26 +307,26 @@ where
     /// Use the Generalized Jacobi Davidson (GJD) to compute the correction
     fn compute_gjd_correction(
         &self,
-        residues: DMatrix<f64>,
-        eigenvalues: &DVector<f64>,
-        ritz_vectors: &DMatrix<f64>,
+        residues: ArrayView2<f64>,
+        eigenvalues: ArrayView1<f64>,
+        ritz_vectors: ArrayView2<f64>,
     ) -> DMatrix<f64> {
-        let dimx = self.target.nrows();
-        let dimy = residues.ncols();
-        let id = DMatrix::<f64>::identity(dimx, dimx);
-        let ones = DVector::<f64>::repeat(dimx, 1.0);
-        let mut correction = DMatrix::<f64>::zeros(dimx, dimy);
-        let diag = self.target.diagonal();
-        for (k, r) in ritz_vectors.column_iter().enumerate() {
+        let dimx: usize = self.target.nrows();
+        let dimy: usize = residues.ncols();
+        let id: Array2<f64> = Array2::eye(dimx);
+        let ones: Array1<f64> = Array1::ones(dimx);
+        let mut correction: Array2<f64> = Array2::zeros((dimx, dimy));
+        let diag = self.target.diag();
+        for (k, r) in ritz_vectors.columns().enumerate() {
             // Create the components of the linear system
-            let t1 = &id - r * r.transpose();
+            let t1 = &id - r * r.t();
             let mut t2 = self.target.clone();
             let val = &diag - &(eigenvalues[k] * &ones);
             t2.set_diagonal(&val);
-            let arr = &t1 * &t2.matrix_matrix_prod(t1.rows(0, dimx));
+            let arr = &t1 * &t2.dot(t1.slice(s![0..dimx, ..]));
             // Solve the linear system
             let decomp = arr.lu();
-            let mut b = -residues.column(k);
+            let mut b = - residues.column(k);
             decomp.solve_mut(&mut b);
             correction.set_column(k, &b);
         }
@@ -340,8 +335,8 @@ where
 }
 
 /// Update the subpace with new vectors
-fn update_subspace(basis: &mut DMatrix<f64>, vectors: DMatrix<f64>, range: (usize, usize)) {
-    let (start, end) = range;
+fn update_subspace(basis: &mut ArrayView2<f64>, vectors: ArrayView2<f64>, range: (usize, usize)) {
+    let (start, end): (usize, usize) = range;
     let mut slice = basis.index_mut((.., start..end));
     slice.copy_from(&vectors.columns(0, end - start));
 }
@@ -355,7 +350,7 @@ fn sort_diagonal(rs: &mut Vec<f64>, conf: &Config) {
 }
 
 /// Check if a vector is sorted in ascending order
-fn is_sorted(xs: &DVector<f64>) -> bool {
+fn is_sorted(xs: ArrayView1<f64>) -> bool {
     for k in 1..xs.len() {
         if xs[k] < xs[k - 1] {
             return false;
@@ -366,12 +361,12 @@ fn is_sorted(xs: &DVector<f64>) -> bool {
 
 #[cfg(test)]
 mod test {
-    use nalgebra::DMatrix;
+    use ndarray::prelude::*;
 
     #[test]
     fn test_update_subspace() {
         let mut arr = DMatrix::<f64>::repeat(3, 3, 1.);
-        let brr = DMatrix::<f64>::zeros(3, 2);
+        let brr = Array::zeros([3, 2]);
         super::update_subspace(&mut arr, brr, (0, 2));
         assert_eq!(arr.column(1).sum(), 0.);
         assert_eq!(arr.column(2).sum(), 3.);
