@@ -7,13 +7,10 @@ eigenvalues of an hermitian matrix using a [Krylov subspace](https://en.wikipedi
 
 */
 use super::SpectrumTarget;
-use crate::utils;
 use ndarray::prelude::*;
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
-use ndarray_linalg::norm;
-use nalgebra::linalg::SymmetricEigen;
-use nalgebra::{DMatrix, DVector};
+use ndarray_linalg::*;
 use std::error;
 use std::fmt;
 
@@ -55,41 +52,42 @@ impl HermitianLanczos {
         let mut vs: Array2<f64> = Array2::zeros([h.nrows(), maximum_iterations]);
 
         // Initial vector
-        let xs: Array1<f64> = norm::normalize(Array1::random((h.nrows()), Uniform::new(0.0, 1.0)));
+        let mut xs: Array1<f64> = Array::random(h.nrows(), Uniform::new(0.0, 1.0));
+        xs = &xs / xs.norm();
         vs.slice_mut(s![.., 0]).assign(&xs);
 
         // Compute the elements of the tridiagonal matrix
         for i in 0..maximum_iterations {
-            let tmp: Array1<f64> = h.dot(vs.column(i));
+            let tmp: Array1<f64> = h.dot(&vs.column(i));
             alphas[i] = tmp.dot(&vs.column(i));
             let mut tmp = {
                 if i == 0 {
-                    &tmp - alphas[0] * vs.column(0)
+                    &tmp - &(alphas[0] * &vs.column(0))
                 } else {
-                    &tmp - alphas[i] * vs.column(i) - betas[i - 1] * vs.column(i - 1)
+                    &tmp - &(alphas[i] * &vs.column(i)) - &(betas[i - 1] * &vs.column(i - 1))
                 }
             };
             // Orthogonalize with previous vectors
             for k in 0..i {
                 let projection = tmp.dot(&vs.column(k));
                 if projection.abs() > tolerance {
-                    tmp -= projection * vs.column(i);
+                    tmp -= &(projection * &vs.column(i));
                 }
             }
             if i < maximum_iterations - 1 {
                 betas[i] = tmp.norm();
                 if betas[i] > tolerance {
-                    vs.set_column(i + 1, &(tmp / betas[i]));
+                    vs.slice_mut(s![.., i + 1]).assign(&(tmp / betas[i]));
                 } else {
-                    vs.set_column(i + 1, &tmp);
+                    vs.slice_mut(s![.., i + 1]).assign(&tmp);
                 }
             }
         }
-        let tridiagonal = Self::construct_tridiagonal(alphas.view(), betas.view());
+        let tridiagonal: Array2<f64> = Self::construct_tridiagonal(alphas.view(), betas.view());
         let ord_sort = !matches!(spectrum_target, SpectrumTarget::Highest);
-        let eig = utils::sort_eigenpairs(SymmetricEigen::new(tridiagonal), ord_sort);
-        let eigenvalues = eig.eigenvalues;
-        let eigenvectors = vs * eig.eigenvectors; // Ritz vectors
+        let (eigenvalues, eigenvectors): (Array1<f64>, Array2<f64>) = tridiagonal.eigh(UPLO::Upper).unwrap();
+        //utils::sort_eigenpairs(SymmetricEigen::new(tridiagonal), ord_sort);
+        let eigenvectors: Array2<f64> = vs.dot(&eigenvectors); // Ritz vectors
 
         Ok(HermitianLanczos {
             eigenvalues,

@@ -22,9 +22,9 @@ use super::{DavidsonCorrection, SpectrumTarget};
 use crate::utils;
 use crate::MGS;
 use ndarray::prelude::*;
-//use ndarray_linalg::prelude::*;
-use nalgebra::linalg::SymmetricEigen;
-use nalgebra::{DMatrix, DVector, Dynamic};
+use ndarray_linalg::*;
+use ndarray::stack;
+use std::iter::FromIterator;
 use std::error;
 use std::f64;
 use std::fmt;
@@ -82,8 +82,8 @@ impl error::Error for DavidsonError {}
 
 /// Structure with the configuration data
 pub struct Davidson {
-    pub eigenvalues: DVector<f64>,
-    pub eigenvectors: DMatrix<f64>,
+    pub eigenvalues: Array1<f64>,
+    pub eigenvectors: Array2<f64>,
 }
 
 impl Davidson {
@@ -105,41 +105,42 @@ impl Davidson {
 
         // Initial subpace
         let mut dim_sub = conf.init_dim;
-        // 1.1 Select the initial ortogonal subspace
-        let mut basis = Self::generate_subspace(&h.diag(), &conf);
+        // 1.1 Select the initial orthogonal subspace
+        let mut basis = Self::generate_subspace(h.diag(), &conf);
 
         // 1.2 Select the correction to use
-        let corrector = CorrectionMethod::<M>::new(&h, conf.method);
+        let corrector = CorrectionMethod::new(h.view(), conf.method);
 
-        // 2. Generate subpace matrix problem by projecting into the basis
-        let first_subspace = basis.columns(0, dim_sub);
-        let mut matrix_subspace = h.dot(&first_subspace);
-        let mut matrix_proj = first_subspace.t() * &matrix_subspace;
+        // 2. Generate subspace matrix problem by projecting into the basis
+        let first_subspace: ArrayView2<f64> = basis.slice(s![.., 0..dim_sub]);
+        let mut matrix_subspace: Array2<f64> = h.dot(&first_subspace);
+        let mut matrix_proj: Array2<f64> = first_subspace.t().dot(&matrix_subspace);
 
         // Outer loop block Davidson schema
         let mut result = Err(DavidsonError);
         for i in 0..conf.max_iters {
             let ord_sort = !matches!(conf.spectrum_target, SpectrumTarget::Highest);
 
-            let eig = utils::sort_eigenpairs(SymmetricEigen::new(matrix_proj.clone()), ord_sort);
+            let (eigenvalues, eigenvectors): (Array1<f64>, Array2<f64>) = matrix_proj.eigh(UPLO::Upper).unwrap();
+            //let eig = utils::sort_eigenpairs(SymmetricEigen::new(matrix_proj.clone()), ord_sort);
 
             // 4. Check for convergence
             // 4.1 Compute the residues
-            let ritz_vectors = basis.columns(0, dim_sub) * eig.eigenvectors.columns(0, dim_sub);
-            let residues = Self::compute_residues(&ritz_vectors, &matrix_subspace, &eig);
+            let ritz_vectors = basis.slice(s![.., 0..dim_sub]).dot(&eigenvectors.slice(s![.., 0..dim_sub]));
+            let residues = Self::compute_residues(ritz_vectors.view(), matrix_subspace.view(), eigenvalues.view(), eigenvectors.view());
 
             // 4.2 Check Converge for each pair eigenvalue/eigenvector
             let errors = Array::from_iter(
                 residues
-                    .slice(.., 0..nvalues)
-                    .columns()
+                    .slice(s![.., 0..nvalues])
+                    .axis_iter(Axis(1))
                     .map(|col| col.norm()),
             );
             // 4.3 Check if all eigenvalues/eigenvectors have converged
             if errors.iter().all(|&x| x < conf.tolerance) {
                 result = Ok(Self::create_results(
-                    &eig.eigenvalues,
-                    &ritz_vectors,
+                    eigenvalues.view(),
+                    ritz_vectors.view(),
                     nvalues,
                 ));
                 break;
@@ -148,33 +149,29 @@ impl Davidson {
             // 5.1 Add the correction vectors to the current basis
             if dim_sub + conf.update_dim <= conf.max_search_space {
                 let correction =
-                    corrector.compute_correction(residues, &eig.eigenvalues, &ritz_vectors);
-                update_subspace(&mut basis, correction, (dim_sub, dim_sub + conf.update_dim));
+                    corrector.compute_correction(residues.view(), eigenvalues.view(), ritz_vectors.view());
+                update_subspace(basis.view_mut(), correction.view(), (dim_sub, dim_sub + conf.update_dim));
 
                 // 6. Orthogonalize the subspace
-                MGS::orthonormalize(&mut basis, dim_sub, dim_sub + conf.update_dim);
+                MGS::orthonormalize(basis.view_mut(), dim_sub, dim_sub + conf.update_dim);
 
                 // Update projected matrix
                 matrix_subspace = {
-                    let mut tmp = matrix_subspace.insert_columns(dim_sub, conf.update_dim, 0.0);
-                    let new_block = h.matrix_matrix_prod(basis.columns(dim_sub, conf.update_dim));
-                    let mut slice = tmp.columns_mut(dim_sub, conf.update_dim);
-                    slice.copy_from(&new_block);
+                    let additional_subspace: Array2<f64> = Array::zeros((matrix_subspace.nrows(), conf.update_dim));
+                    let mut tmp = stack![Axis(1), matrix_subspace, additional_subspace];
+                    let new_block = h.dot(&basis.slice(s![.., dim_sub..conf.update_dim]));
+                    tmp.slice_mut(s![.., dim_sub..conf.update_dim]).assign(&new_block);
                     tmp
                 };
 
                 matrix_proj = {
-                    let new_dim = dim_sub + conf.update_dim;
-                    let new_subspace = basis.columns(0, new_dim);
-                    let mut tmp = DMatrix::<f64>::zeros(new_dim, new_dim);
-                    let mut slice = tmp.index_mut((..dim_sub, ..dim_sub));
-                    slice.copy_from(&matrix_proj);
-                    let new_block = new_subspace.transpose()
-                        * matrix_subspace.columns(dim_sub, conf.update_dim);
-                    let mut slice = tmp.index_mut((.., dim_sub..));
-                    slice.copy_from(&new_block);
-                    let mut slice = tmp.index_mut((dim_sub.., ..));
-                    slice.copy_from(&new_block.transpose());
+                    let new_dim: usize = dim_sub + conf.update_dim;
+                    let new_subspace: ArrayView2<f64> = basis.slice(s![.., 0..new_dim]);
+                    let new_block = new_subspace.t().dot(&matrix_subspace.slice(s![.., dim_sub..conf.update_dim]));
+                    let mut tmp: Array2<f64> = Array::zeros((new_dim, new_dim));
+                    tmp.slice_mut(s![0..dim_sub, 0..dim_sub]).assign(&matrix_proj);
+                    tmp.slice_mut(s![.., dim_sub..]).assign(&new_block);
+                    tmp.slice_mut(s![dim_sub.., ..]).assign(&new_block.t());
                     tmp
                 };
                 // update counter
@@ -185,10 +182,10 @@ impl Davidson {
             } else {
                 dim_sub = conf.init_dim;
                 basis.fill(0.0);
-                update_subspace(&mut basis, ritz_vectors, (0, dim_sub));
+                update_subspace(basis.view_mut(), ritz_vectors.view(), (0, dim_sub));
                 // Update projected matrix
-                matrix_subspace = h.matrix_matrix_prod(basis.columns(0, dim_sub));
-                matrix_proj = basis.columns(0, dim_sub).transpose() * &matrix_subspace;
+                matrix_subspace = h.dot(&basis.slice(s![.., 0..dim_sub]));
+                matrix_proj = basis.slice(s![.., 0..dim_sub]).t().dot(&matrix_subspace);
             }
             // Check number of iterations
             if i > conf.max_iters {
@@ -204,17 +201,9 @@ impl Davidson {
         ritz_vectors: ArrayView2<f64>,
         nvalues: usize,
     ) -> Davidson {
-        let eigenvectors = DMatrix::<f64>::from_iterator(
-            ritz_vectors.nrows(),
-            nvalues,
-            ritz_vectors.columns(0, nvalues).iter().cloned(),
-        );
-        let eigenvalues = Array::from_iter(
-            subspace_eigenvalues.rows(0, nvalues).iter().cloned(),
-        );
         Davidson {
-            eigenvalues,
-            eigenvectors,
+            eigenvalues: subspace_eigenvalues.slice(s![0..nvalues]).to_owned(),
+            eigenvectors: ritz_vectors.slice(s![.., 0..nvalues]).to_owned(),
         }
     }
 
@@ -222,30 +211,31 @@ impl Davidson {
     fn compute_residues(
         ritz_vectors: ArrayView2<f64>,
         matrix_subspace: ArrayView2<f64>,
-        eig: &SymmetricEigen<f64, Dynamic>,
+        eigenvalues: ArrayView1<f64>,
+        eigenvectors: ArrayView2<f64>,
     ) -> Array2<f64> {
-        let dim_sub = eig.eigenvalues.nrows();
-        let lambda = {
-            let mut tmp = DMatrix::<f64>::zeros(dim_sub, dim_sub);
-            tmp.set_diagonal(&eig.eigenvalues);
-            tmp
-        };
-        let vs = matrix_subspace * &eig.eigenvectors;
-        let guess = ritz_vectors * lambda;
+        let vs: Array2<f64> = matrix_subspace.dot(&eigenvectors);
+        let guess: Array2<f64> = ritz_vectors.dot(&Array::from_diag(&eigenvalues));
         vs - guess
     }
 
     /// Generate initial orthonormal subspace
     fn generate_subspace(diag: ArrayView1<f64>, conf: &Config) -> Array2<f64> {
         if is_sorted(diag) && conf.spectrum_target == SpectrumTarget::Lowest {
-            DMatrix::<f64>::identity(diag.nrows(), conf.max_search_space)
+            let mut mtx: Array2<f64> = Array::eye(conf.max_search_space.clone());
+            if &conf.max_search_space < &diag.len() {
+                let zero_block: Array2<f64> = Array2::zeros((diag.len() - conf.max_search_space.clone()
+                                                             , conf.max_search_space.clone()));
+                mtx = stack![Axis(0), mtx, zero_block];
+            }
+            mtx
         } else {
-            let xs = diag.as_slice().to_vec();
+            let xs = diag.as_slice().unwrap().to_vec();
             let mut rs = xs.clone();
 
             // update the matrix according to the spectrumtarget
             sort_diagonal(&mut rs, &conf);
-            let mut mtx = Array2::zeros([diag.nrows(), conf.max_search_space]);
+            let mut mtx = Array2::zeros([diag.len(), conf.max_search_space]);
             for i in 0..conf.max_search_space {
                 let index = rs
                     .iter()
@@ -259,17 +249,17 @@ impl Davidson {
 }
 
 /// Structure containing the correction methods
-struct CorrectionMethod
+struct CorrectionMethod<'a>
 {
     /// The initial target matrix
-    target: ArrayView2<f64>
+    target: ArrayView2<'a, f64>,
     /// Method used to compute the correction
     method: DavidsonCorrection,
 }
 
-impl CorrectionMethod
+impl<'a> CorrectionMethod<'a>
 {
-    fn new(target: ArrayView2<f64>, method: DavidsonCorrection) -> Self {
+    fn new(target: ArrayView2<'a, f64>, method: DavidsonCorrection) -> Self {
         Self { target, method }
     }
 
@@ -297,8 +287,8 @@ impl CorrectionMethod
         let d = self.target.diag();
         let mut correction: Array2<f64> = Array::zeros((self.target.nrows(), residues.ncols()));
         for (k, lambda) in eigenvalues.iter().enumerate() {
-            let tmp = DVector::<f64>::repeat(self.target.nrows(), *lambda) - &d;
-            let rs = residues.column(k).component_div(&tmp);
+            let tmp: Array1<f64> = Array::from_elem(self.target.nrows(), *lambda) - &d;
+            let rs = &residues.column(k) / &tmp;
             correction.slice_mut(s![.., k]).assign(&rs);
         }
         correction
@@ -310,35 +300,34 @@ impl CorrectionMethod
         residues: ArrayView2<f64>,
         eigenvalues: ArrayView1<f64>,
         ritz_vectors: ArrayView2<f64>,
-    ) -> DMatrix<f64> {
+    ) -> Array2<f64> {
         let dimx: usize = self.target.nrows();
         let dimy: usize = residues.ncols();
         let id: Array2<f64> = Array2::eye(dimx);
         let ones: Array1<f64> = Array1::ones(dimx);
         let mut correction: Array2<f64> = Array2::zeros((dimx, dimy));
         let diag = self.target.diag();
-        for (k, r) in ritz_vectors.columns().enumerate() {
+        for (k, r) in ritz_vectors.axis_iter(Axis(1)).enumerate() {
             // Create the components of the linear system
-            let t1 = &id - r * r.t();
-            let mut t2 = self.target.clone();
+            let t1 = &id - r.dot(&r.t());
+            let mut t2 = self.target.clone().to_owned();
             let val = &diag - &(eigenvalues[k] * &ones);
-            t2.set_diagonal(&val);
-            let arr = &t1 * &t2.dot(t1.slice(s![0..dimx, ..]));
+            t2.diag_mut().assign(&val);
+            let arr = t1.dot(&t2.dot(&t1.slice(s![0..dimx, ..])));
             // Solve the linear system
-            let decomp = arr.lu();
-            let mut b = - residues.column(k);
-            decomp.solve_mut(&mut b);
-            correction.set_column(k, &b);
+            let decomp = arr.factorize_into().unwrap();
+            let b = -1.0 * &residues.column(k);
+            let x = decomp.solve_into(b).unwrap();
+            correction.slice_mut(s![.., k]).assign(&x);
         }
         correction
     }
 }
 
 /// Update the subpace with new vectors
-fn update_subspace(basis: &mut ArrayView2<f64>, vectors: ArrayView2<f64>, range: (usize, usize)) {
+fn update_subspace(mut basis: ArrayViewMut2<f64>, vectors: ArrayView2<f64>, range: (usize, usize)) {
     let (start, end): (usize, usize) = range;
-    let mut slice = basis.index_mut((.., start..end));
-    slice.copy_from(&vectors.columns(0, end - start));
+    basis.slice_mut(s![.., start..end]).assign(&vectors.slice(s![.., 0..end - start]));
 }
 
 fn sort_diagonal(rs: &mut Vec<f64>, conf: &Config) {

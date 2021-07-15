@@ -4,31 +4,27 @@
 
  */
 
-use nalgebra as na;
 use ndarray::prelude::*;
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 use std::iter::FromIterator;
 use approx::relative_eq;
-use na::linalg::SymmetricEigen;
-use na::Dynamic;
-use na::{DMatrix, DVector};
 
 /// Generate a random highly diagonal symmetric matrix
 pub fn generate_diagonal_dominant(dim: usize, sparsity: f64) -> Array2<f64> {
     let xs = 1..=dim;
     let it = xs.map(|x: usize| x as f64);
-    let mut arr = Array::random((dim, dim), Uniform::new(0., 1.));
-    arr += &arr.t();
-    arr *= sparsity;
+    let arr = Array::random((dim, dim), Uniform::new(0.0, 1.0));
+    let arr = &arr + &arr.t();
+    let mut arr = &arr * sparsity;
     arr.diag_mut().assign(&Array::from_iter(it));
     arr
 }
 
 /// Random symmetric matrix
 pub fn generate_random_symmetric(dim: usize, magnitude: f64) -> Array2<f64> {
-    let arr = Array::random((dim, dim), Uniform::new(0., 1.)) * magnitude;
-    &arr * arr.transpose()
+    let arr = Array::random((dim, dim), Uniform::new(0.0, 1.0)) * magnitude;
+    arr.dot(&arr.t())
 }
 
 /// Random Sparse matrix
@@ -46,12 +42,12 @@ pub fn generate_random_sparse_symmetric(dim: usize, lim: usize, sparsity: f64) -
 
 /// Sort the eigenvalues and their corresponding eigenvectors in ascending order
 pub fn sort_eigenpairs(
-    eig: SymmetricEigen<f64, Dynamic>,
+    eigenvalues: Array1<f64>,
+    eigenvectors: Array2<f64>,
     ascending: bool,
-) -> SymmetricEigen<f64, Dynamic> {
+) -> (Array1<f64>, Array2<f64>) {
     // Sort the eigenvalues
-    let mut vs: Vec<(f64, usize)> = eig
-        .eigenvalues
+    let mut vs: Vec<(f64, usize)> = eigenvalues
         .iter()
         .enumerate()
         .map(|(idx, &x)| (x, idx))
@@ -59,23 +55,19 @@ pub fn sort_eigenpairs(
     sort_vector(&mut vs, ascending);
 
     // Sorted eigenvalues
-    let eigenvalues = DVector::<f64>::from_iterator(vs.len(), vs.iter().map(|t| t.0));
+    let eigenvalues: Array1<f64> = Array1::from_iter(vs.iter().map(|t| t.0));
 
     // Indices of the sorted eigenvalues
-    let indices: Vec<_> = vs.iter().map(|t| t.1).collect();
+    let indices: Vec<usize> = vs.iter().map(|t| t.1).collect();
 
     // Create sorted eigenvectors
-    let dim_rows = eig.eigenvectors.nrows();
-    let dim_cols = eig.eigenvectors.ncols();
-    let mut eigenvectors = DMatrix::<f64>::zeros(dim_rows, dim_cols);
+    let mut sorted_eigenvectors: Array2<f64> = Array2::zeros(eigenvectors.dim());
 
     for (k, i) in indices.iter().enumerate() {
-        eigenvectors.set_column(k, &eig.eigenvectors.column(*i));
+        sorted_eigenvectors.slice_mut(s![.., k]).assign(&eigenvectors.column(*i));
     }
-    SymmetricEigen {
-        eigenvectors,
-        eigenvalues,
-    }
+
+    (eigenvalues, sorted_eigenvectors)
 }
 
 pub fn sort_vector<T: PartialOrd>(vs: &mut Vec<T>, ascending: bool) {
@@ -87,20 +79,21 @@ pub fn sort_vector<T: PartialOrd>(vs: &mut Vec<T>, ascending: bool) {
 }
 
 pub fn test_eigenpairs(
-    reference: &na::linalg::SymmetricEigen<f64, na::Dynamic>,
-    eigenpair: (na::DVector<f64>, na::DMatrix<f64>),
+    ref_eigenpair: (Array1<f64>, Array2<f64>),
+    eigenpair: (Array1<f64>, Array2<f64>),
     number: usize,
 ) {
     let (dav_eigenvalues, dav_eigenvectors) = eigenpair;
+    let (ref_eigenvalues, ref_eigenvectors) = ref_eigenpair;
     for i in 0..number {
         // Test Eigenvalues
         assert!(relative_eq!(
-            reference.eigenvalues[i],
+            ref_eigenvalues[i],
             dav_eigenvalues[i],
             epsilon = 1e-6
         ));
         // Test Eigenvectors
-        let x = reference.eigenvectors.column(i);
+        let x = ref_eigenvectors.column(i);
         let y = dav_eigenvectors.column(i);
         // The autovectors may different in their sign
         // They should be either parallel or antiparallel
@@ -126,7 +119,7 @@ mod test {
     }
 
     fn test_symmetric(matrix: Array2<f64>) {
-        let rs = &matrix - &matrix.transpose();
+        let rs = &matrix - &matrix.t();
         assert!(rs.sum() < f64::EPSILON);
     }
 }

@@ -9,8 +9,6 @@ on computers.
  */
 use ndarray::prelude::*;
 use ndarray_linalg::Norm;
-use ndarray_rand::RandomExt;
-use ndarray_rand::rand_distr::Uniform;
 
 pub struct MGS {
     pub basis: Array2<f64>,
@@ -21,27 +19,30 @@ impl MGS {
     /// * `vectors` to diagonalize as columns of the matrix
     /// * `start` index of the column to start orthogonalizing
     /// * `end` last index of the column to diagonalize (non-inclusive)
-    pub fn orthonormalize(basis: ArrayViewMut2<f64>, start: usize, end: usize) {
+    pub fn orthonormalize(mut basis: ArrayViewMut2<f64>, start: usize, end: usize) {
         for i in start..end {
             for j in 0..i {
                 let proj = MGS::project(basis.column(j), basis.column(i));
-                basis.slice_mut(s![.., i]).assign(&(&basis.column(i) - &proj));
+                let new_column_i: Array1<f64> = &basis.column(i) - &proj;
+                basis.slice_mut(s![.., i]).assign(&new_column_i);
             }
-            basis.slice_mut(s![.., i]).assign(&(&basis.column(i) / basis.column(i).norm()));
+            let normalized_column: Array1<f64> = &basis.column(i) / basis.column(i).norm();
+            basis.slice_mut(s![.., i]).assign(&normalized_column);
         }
     }
 
     // Project
-    fn project(v1: ArrayView1<f64>, v2: ArrayView1<f64>) -> Array2<f64> {
+    fn project(v1: ArrayView1<f64>, v2: ArrayView1<f64>) -> Array1<f64> {
         // THIS IS WRONG
-        let magnitud = v1.dot(&v2) / v1.dot(&v1);
-        v1 * magnitud
+        let magnitude = v1.dot(&v2) / v1.dot(&v1);
+        magnitude * &v1
     }
 }
 
 #[cfg(test)]
 mod test {
     use ndarray::prelude::*;
+    use ndarray_rand::RandomExt;
 
     #[test]
     fn test_gram_schmidt() {
@@ -58,8 +59,8 @@ mod test {
 
     fn fun_test(vectors: Array2<f64>, start: usize) {
         let mut basis = vectors.clone();
-        super::MGS::orthonormalize(&mut basis, start, vectors.ncols());
-        let result: Array2<f64> = basis.t() * &basis;
-        assert!(result.is_identity(1e-8));
+        super::MGS::orthonormalize(basis.view_mut(), start, vectors.ncols());
+        let result: Array2<f64> = basis.t().dot(basis);
+        assert!(result.diag().sum() - result.nrows() as f64 < 1e-8);
     }
 }
