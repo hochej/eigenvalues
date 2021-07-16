@@ -9,15 +9,16 @@ use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 use std::iter::FromIterator;
 use approx::relative_eq;
+use log::info;
+use std::time::Instant;
 
 /// Generate a random highly diagonal symmetric matrix
 pub fn generate_diagonal_dominant(dim: usize, sparsity: f64) -> Array2<f64> {
-    let xs = 1..=dim;
-    let it = xs.map(|x: usize| x as f64);
-    let arr = Array::random((dim, dim), Uniform::new(0.0, 1.0));
-    let arr = &arr + &arr.t();
+    let diag: Array1<f64> = Array::random(dim, Uniform::new(0.0, dim as f64));
+    let off_diag = Array::random((dim, dim), Uniform::new(0.0, 1.0));
+    let arr = &off_diag + &off_diag.t();
     let mut arr = &arr * sparsity;
-    arr.diag_mut().assign(&Array::from_iter(it));
+    arr.diag_mut().assign(&diag);
     arr
 }
 
@@ -101,6 +102,48 @@ pub fn test_eigenpairs(
         assert!(relative_eq!(dot, 1.0, epsilon = 1e-6));
     }
 }
+
+pub fn print_davidson_init(max_iter: usize, nroots: usize, tolerance: f64) {
+    info!("{:^80}", "");
+    info!("{: ^80}", "Iterative Davidson Routine");
+    info!("{:-^80}", "");
+    info!("{: <25} {:4.2e}", "Energy is converged when residual is below:", tolerance);
+    info!("{: <25} {}", "Maximum number of iterations:", max_iter);
+    info!("{: >4} {: <25}", nroots, " Roots will be computed.");
+    info!("{:-^75} ", "");
+    info!(
+        "{: <5} {: >12} {: >12} {: >18} {: >12}",
+        "Iter.", "Roots conv.", "Roots left", "Total dev.", "Max dev."
+    );
+    info!("{:-^75} ", "");
+}
+
+pub fn print_davidson_iteration(iter: usize, roots_cvd: usize, roots_lft: usize, t_dev: f64, max_dev:f64) {
+    info!(
+        "{: >5} {:>12} {:>12} {:>18.10e} {:>12.4}",
+        iter + 1,
+        roots_cvd,
+        roots_lft,
+        t_dev,
+        max_dev
+    );
+}
+
+pub fn print_davidson_end(result_is_ok: bool, time: Instant) {
+    info!("{:-^75} ", "");
+    if result_is_ok {
+        info!("Davidson routine converged")
+    } else {
+        info!("Davidson routine did not converge!")
+    }
+    info!("{:>68} {:>8.2} s",
+           "elapsed time:",
+           time.elapsed().as_secs_f32()
+    );
+    info!("{:-^80}", "");
+    info!("{:^80}", "");
+}
+
 
 #[cfg(test)]
 mod test {

@@ -24,10 +24,12 @@ use crate::MGS;
 use ndarray::prelude::*;
 use ndarray_linalg::*;
 use ndarray::stack;
+use ndarray_stats::QuantileExt;
 use std::iter::FromIterator;
 use std::error;
 use std::f64;
 use std::fmt;
+use std::time::Instant;
 
 /// Structure containing the initial configuration data
 struct Config {
@@ -62,7 +64,7 @@ impl Config {
             method,
             spectrum_target: target,
             tolerance,
-            max_iters: 50,
+            max_iters: 100,
             max_search_space,
             init_dim: nvalues * 2,
             update_dim: nvalues * 2,
@@ -100,6 +102,7 @@ impl Davidson {
         spectrum_target: SpectrumTarget,
         tolerance: f64,
     ) -> Result<Self, DavidsonError> {
+        let time: Instant = Instant::now();
         // Initial configuration
         let conf = Config::new(nvalues, h.nrows(), method, spectrum_target, tolerance);
 
@@ -118,6 +121,7 @@ impl Davidson {
 
         // Outer loop block Davidson schema
         let mut result = Err(DavidsonError);
+        utils::print_davidson_init(conf.max_iters, nvalues, tolerance);
         for i in 0..conf.max_iters {
             let ord_sort = !matches!(conf.spectrum_target, SpectrumTarget::Highest);
 
@@ -130,12 +134,17 @@ impl Davidson {
             let residues = Self::compute_residues(ritz_vectors.view(), matrix_subspace.view(), eigenvalues.view(), eigenvectors.view());
 
             // 4.2 Check Converge for each pair eigenvalue/eigenvector
-            let errors = Array::from_iter(
+            let errors: Array1<f64> = Array::from_iter(
                 residues
                     .slice(s![.., 0..nvalues])
                     .axis_iter(Axis(1))
                     .map(|col| col.norm()),
             );
+
+            let total_error: f64 = errors.norm();
+            let max_error: f64 = *errors.max().unwrap();
+            utils::print_davidson_iteration(i, 0, 0, total_error, max_error);
+
             // 4.3 Check if all eigenvalues/eigenvectors have converged
             if errors.iter().all(|&x| x < conf.tolerance) {
                 result = Ok(Self::create_results(
@@ -193,6 +202,7 @@ impl Davidson {
                 break;
             }
         }
+        utils::print_davidson_end(result.is_ok(), time);
         result
     }
 
