@@ -122,7 +122,7 @@ impl Davidson {
             let ord_sort = !matches!(conf.spectrum_target, SpectrumTarget::Highest);
 
             let (eigenvalues, eigenvectors): (Array1<f64>, Array2<f64>) = matrix_proj.eigh(UPLO::Upper).unwrap();
-            //let eig = utils::sort_eigenpairs(SymmetricEigen::new(matrix_proj.clone()), ord_sort);
+            let (eigenvalues, eigenvectors): (Array1<f64>, Array2<f64>) = utils::sort_eigenpairs(eigenvalues, eigenvectors, ord_sort);
 
             // 4. Check for convergence
             // 4.1 Compute the residues
@@ -145,6 +145,7 @@ impl Davidson {
                 ));
                 break;
             }
+
             // 5. Update subspace basis set
             // 5.1 Add the correction vectors to the current basis
             if dim_sub + conf.update_dim <= conf.max_search_space {
@@ -159,15 +160,15 @@ impl Davidson {
                 matrix_subspace = {
                     let additional_subspace: Array2<f64> = Array::zeros((matrix_subspace.nrows(), conf.update_dim));
                     let mut tmp = stack![Axis(1), matrix_subspace, additional_subspace];
-                    let new_block = h.dot(&basis.slice(s![.., dim_sub..conf.update_dim]));
-                    tmp.slice_mut(s![.., dim_sub..conf.update_dim]).assign(&new_block);
+                    let new_block = h.dot(&basis.slice(s![.., dim_sub..(dim_sub+conf.update_dim)]));
+                    tmp.slice_mut(s![.., dim_sub..(dim_sub+conf.update_dim)]).assign(&new_block);
                     tmp
                 };
 
                 matrix_proj = {
                     let new_dim: usize = dim_sub + conf.update_dim;
                     let new_subspace: ArrayView2<f64> = basis.slice(s![.., 0..new_dim]);
-                    let new_block = new_subspace.t().dot(&matrix_subspace.slice(s![.., dim_sub..conf.update_dim]));
+                    let new_block = new_subspace.t().dot(&matrix_subspace.slice(s![.., dim_sub..(dim_sub+conf.update_dim)]));
                     let mut tmp: Array2<f64> = Array::zeros((new_dim, new_dim));
                     tmp.slice_mut(s![0..dim_sub, 0..dim_sub]).assign(&matrix_proj);
                     tmp.slice_mut(s![.., dim_sub..]).assign(&new_block);
@@ -230,17 +231,21 @@ impl Davidson {
             }
             mtx
         } else {
-            let xs = diag.as_slice().unwrap().to_vec();
-            let mut rs = xs.clone();
+            let xs: Vec<f64> = diag.to_vec();
+            let mut rs: Vec<f64> = xs.clone();
 
-            // update the matrix according to the spectrumtarget
+            // update the matrix according to the spectrum target
+            println!("RS {:?}", rs);
             sort_diagonal(&mut rs, &conf);
             let mut mtx = Array2::zeros([diag.len(), conf.max_search_space]);
             for i in 0..conf.max_search_space {
+                println!("RS {:?} i {} xs_i {} ", rs, i, xs[i]);
+                println!("XS {:?}", xs);
                 let index = rs
                     .iter()
                     .position(|&x| (x - xs[i]).abs() < f64::EPSILON)
                     .unwrap();
+                println!("I {} INDEX {} SHAPE {:?}", i, index, mtx.dim());
                 mtx[[i, index]] = 1.0;
             }
             mtx
@@ -354,9 +359,9 @@ mod test {
 
     #[test]
     fn test_update_subspace() {
-        let mut arr = DMatrix::<f64>::repeat(3, 3, 1.);
+        let mut arr = Array2::from_elem((3, 3), 1.);
         let brr = Array::zeros([3, 2]);
-        super::update_subspace(&mut arr, brr, (0, 2));
+        super::update_subspace( arr.view_mut(), brr.view(), (0, 2));
         assert_eq!(arr.column(1).sum(), 0.);
         assert_eq!(arr.column(2).sum(), 3.);
     }

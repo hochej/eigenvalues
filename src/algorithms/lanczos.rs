@@ -6,6 +6,7 @@ The [Hermitian Lanczos](https://en.wikipedia.org/wiki/Lanczos_algorithm) is an a
 eigenvalues of an hermitian matrix using a [Krylov subspace](https://en.wikipedia.org/wiki/Krylov_subspace)
 
 */
+use crate::utils;
 use super::SpectrumTarget;
 use ndarray::prelude::*;
 use ndarray_rand::RandomExt;
@@ -86,7 +87,8 @@ impl HermitianLanczos {
         let tridiagonal: Array2<f64> = Self::construct_tridiagonal(alphas.view(), betas.view());
         let ord_sort = !matches!(spectrum_target, SpectrumTarget::Highest);
         let (eigenvalues, eigenvectors): (Array1<f64>, Array2<f64>) = tridiagonal.eigh(UPLO::Upper).unwrap();
-        //utils::sort_eigenpairs(SymmetricEigen::new(tridiagonal), ord_sort);
+        let (eigenvalues, eigenvectors): (Array1<f64>, Array2<f64>) = utils::sort_eigenpairs(eigenvalues, eigenvectors, ord_sort);
+
         let eigenvectors: Array2<f64> = vs.dot(&eigenvectors); // Ritz vectors
 
         Ok(HermitianLanczos {

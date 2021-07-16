@@ -42,7 +42,9 @@ impl MGS {
 #[cfg(test)]
 mod test {
     use ndarray::prelude::*;
+
     use ndarray_rand::RandomExt;
+    use ndarray_rand::rand_distr::Uniform;
 
     #[test]
     fn test_gram_schmidt() {
@@ -53,14 +55,14 @@ mod test {
 
     #[test]
     fn test_start_gram_schmidt() {
-        let arr: Array1<f64> = array![1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 2.0];
-        fun_test(arr, 1);
+        let arr: Array2<f64> = array![[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 2.0]];
+        fun_test(arr, 0);
     }
 
     fn fun_test(vectors: Array2<f64>, start: usize) {
         let mut basis = vectors.clone();
         super::MGS::orthonormalize(basis.view_mut(), start, vectors.ncols());
-        let result: Array2<f64> = basis.t().dot(basis);
-        assert!(result.diag().sum() - result.nrows() as f64 < 1e-8);
+        let result: Array2<f64> = basis.t().dot(&basis);
+        assert!((result.diag().sum() - (result.nrows() as f64)) < 1e-8);
     }
 }
