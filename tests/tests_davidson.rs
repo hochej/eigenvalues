@@ -90,5 +90,4 @@ fn test_davidson_highest() {
     )
     .unwrap();
     test_eigenpairs(eig, (dav.eigenvalues, dav.eigenvectors), nvalues);
-    panic!("H");
 }

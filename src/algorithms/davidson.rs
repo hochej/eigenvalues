@@ -235,18 +235,14 @@ impl Davidson {
             let mut rs: Vec<f64> = xs.clone();
 
             // update the matrix according to the spectrum target
-            println!("RS {:?}", rs);
             sort_diagonal(&mut rs, &conf);
             let mut mtx = Array2::zeros([diag.len(), conf.max_search_space]);
             for i in 0..conf.max_search_space {
-                println!("RS {:?} i {} xs_i {} ", rs, i, xs[i]);
-                println!("XS {:?}", xs);
                 let index = rs
                     .iter()
                     .position(|&x| (x - xs[i]).abs() < f64::EPSILON)
                     .unwrap();
-                println!("I {} INDEX {} SHAPE {:?}", i, index, mtx.dim());
-                mtx[[i, index]] = 1.0;
+                mtx[[index, i]] = 1.0;
             }
             mtx
         }
