@@ -11,6 +11,7 @@ use std::iter::FromIterator;
 use approx::relative_eq;
 use log::info;
 use std::time::Instant;
+use std::cmp::Ordering;
 
 /// Generate a random highly diagonal symmetric matrix
 pub fn generate_diagonal_dominant(dim: usize, sparsity: f64) -> Array2<f64> {
@@ -101,6 +102,12 @@ pub fn test_eigenpairs(
         let dot = x.dot(&y).abs();
         assert!(relative_eq!(dot, 1.0, epsilon = 1e-6));
     }
+}
+
+pub fn argsort(v: ArrayView1<f64>) -> Vec<usize> {
+    let mut idx = (0..v.len()).collect::<Vec<_>>();
+    idx.sort_unstable_by(|&i, &j| v[i].partial_cmp(&v[j]).unwrap_or(Ordering::Equal));
+    idx
 }
 
 pub fn print_davidson_init(max_iter: usize, nroots: usize, tolerance: f64) {

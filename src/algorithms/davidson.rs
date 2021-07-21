@@ -27,9 +27,10 @@ use ndarray::stack;
 use ndarray_stats::QuantileExt;
 use std::iter::FromIterator;
 use std::error;
-use std::f64;
 use std::fmt;
 use std::time::Instant;
+use ndarray_rand::RandomExt;
+use ndarray_rand::rand::distributions::Uniform;
 
 /// Structure containing the initial configuration data
 struct Config {
@@ -110,10 +111,10 @@ impl Davidson {
         let mut dim_sub = conf.init_dim;
         // 1.1 Select the initial orthogonal subspace
         let mut basis = Self::generate_subspace(h.diag(), &conf);
-
+        //let mut basis: Array2<f64> = Array::random((h.nrows(), dim_sub), Uniform::new(0.0, 1.0));
         // 1.2 Select the correction to use
         let corrector = CorrectionMethod::new(h.view(), conf.method);
-
+        println!("basis {:2.1}", basis);
         // 2. Generate subspace matrix problem by projecting into the basis
         let first_subspace: ArrayView2<f64> = basis.slice(s![.., 0..dim_sub]);
         let mut matrix_subspace: Array2<f64> = h.dot(&first_subspace);
@@ -124,10 +125,10 @@ impl Davidson {
         utils::print_davidson_init(conf.max_iters, nvalues, tolerance);
         for i in 0..conf.max_iters {
             let ord_sort = !matches!(conf.spectrum_target, SpectrumTarget::Highest);
-
+            println!("matrix proj {}", matrix_proj);
             let (eigenvalues, eigenvectors): (Array1<f64>, Array2<f64>) = matrix_proj.eigh(UPLO::Upper).unwrap();
             let (eigenvalues, eigenvectors): (Array1<f64>, Array2<f64>) = utils::sort_eigenpairs(eigenvalues, eigenvectors, ord_sort);
-
+            println!("EIGENVALUES {} {}", i, eigenvalues);
             // 4. Check for convergence
             // 4.1 Compute the residues
             let ritz_vectors = basis.slice(s![.., 0..dim_sub]).dot(&eigenvectors.slice(s![.., 0..dim_sub]));
@@ -146,7 +147,7 @@ impl Davidson {
             utils::print_davidson_iteration(i, 0, 0, total_error, max_error);
 
             // 4.3 Check if all eigenvalues/eigenvectors have converged
-            if errors.iter().all(|&x| x < conf.tolerance) {
+            if errors.iter().all(|&x| x < conf.tolerance) && i > 1{
                 result = Ok(Self::create_results(
                     eigenvalues.view(),
                     ritz_vectors.view(),
@@ -241,18 +242,13 @@ impl Davidson {
             }
             mtx
         } else {
-            let xs: Vec<f64> = diag.to_vec();
-            let mut rs: Vec<f64> = xs.clone();
-
-            // update the matrix according to the spectrum target
-            sort_diagonal(&mut rs, &conf);
-            let mut mtx = Array2::zeros([diag.len(), conf.max_search_space]);
-            for i in 0..conf.max_search_space {
-                let index = rs
-                    .iter()
-                    .position(|&x| (x - xs[i]).abs() < f64::EPSILON)
-                    .unwrap();
-                mtx[[index, i]] = 1.0;
+            let order: Vec<usize> = utils::argsort(diag.view());
+            println!("ORDER {:?}", order);
+            let mut mtx: Array2<f64> = Array2::zeros([diag.len(), conf.max_search_space]);
+            for (idx, i) in order.into_iter().enumerate() {
+                if idx < conf.max_search_space {
+                    mtx[[i, idx]] = 1.0;
+                }
             }
             mtx
         }
