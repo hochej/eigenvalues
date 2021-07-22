@@ -1,7 +1,7 @@
 use eigenvalues::algorithms::davidson::Davidson;
 use eigenvalues::utils::generate_diagonal_dominant;
 use eigenvalues::utils::{sort_eigenpairs, test_eigenpairs};
-use eigenvalues::{DavidsonCorrection, SpectrumTarget};
+use eigenvalues::{DavidsonCorrection, SpectrumTarget, Davidson};
 use ndarray_linalg::*;
 use ndarray::prelude::*;
 

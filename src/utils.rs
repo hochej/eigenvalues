@@ -5,18 +5,18 @@
  */
 
 use ndarray::prelude::*;
-use ndarray_rand::RandomExt;
-use ndarray_rand::rand_distr::Uniform;
-use std::iter::FromIterator;
-use approx::relative_eq;
+use ndarray_linalg::generate::random;
 use log::info;
 use std::time::Instant;
 use std::cmp::Ordering;
+use crate::array_sort::*;
+use approx::relative_eq;
+
 
 /// Generate a random highly diagonal symmetric matrix
 pub fn generate_diagonal_dominant(dim: usize, sparsity: f64) -> Array2<f64> {
-    let diag: Array1<f64> = Array::random(dim, Uniform::new(0.0, dim as f64));
-    let off_diag = Array::random((dim, dim), Uniform::new(0.0, 1.0));
+    let diag: Array1<f64> = 10.0 * random([dim]);
+    let off_diag: Array2<f64> = random((dim, dim));
     let arr = &off_diag + &off_diag.t();
     let mut arr = &arr * sparsity;
     arr.diag_mut().assign(&diag);
@@ -25,7 +25,7 @@ pub fn generate_diagonal_dominant(dim: usize, sparsity: f64) -> Array2<f64> {
 
 /// Random symmetric matrix
 pub fn generate_random_symmetric(dim: usize, magnitude: f64) -> Array2<f64> {
-    let arr = Array::random((dim, dim), Uniform::new(0.0, 1.0)) * magnitude;
+    let arr: Array2<f64> = random((dim, dim)) * magnitude;
     arr.dot(&arr.t())
 }
 
@@ -44,33 +44,18 @@ pub fn generate_random_sparse_symmetric(dim: usize, lim: usize, sparsity: f64) -
 
 /// Sort the eigenvalues and their corresponding eigenvectors in ascending order
 pub fn sort_eigenpairs(
-    eigenvalues: Array1<f64>,
-    eigenvectors: Array2<f64>,
-    ascending: bool,
+    w: Array1<f64>, // eigenvalues
+    v: Array2<f64>, // eigenvectors
 ) -> (Array1<f64>, Array2<f64>) {
-    // Sort the eigenvalues
-    let mut vs: Vec<(f64, usize)> = eigenvalues
-        .iter()
-        .enumerate()
-        .map(|(idx, &x)| (x, idx))
-        .collect();
-    sort_vector(&mut vs, ascending);
-
-    // Sorted eigenvalues
-    let eigenvalues: Array1<f64> = Array1::from_iter(vs.iter().map(|t| t.0));
-
-    // Indices of the sorted eigenvalues
-    let indices: Vec<usize> = vs.iter().map(|t| t.1).collect();
-
-    // Create sorted eigenvectors
-    let mut sorted_eigenvectors: Array2<f64> = Array2::zeros(eigenvectors.dim());
-
-    for (k, i) in indices.iter().enumerate() {
-        sorted_eigenvectors.slice_mut(s![.., k]).assign(&eigenvectors.column(*i));
-    }
-
-    (eigenvalues, sorted_eigenvectors)
+    // Create the permutation array.
+    let perm: Permutation = w.sort_axis_by(Axis(0), |i, j| w[i] < w[j]);
+    // Sorted eigenvalues.
+    let w: Array1<f64> = w.permute_axis(Axis(0), &perm);
+    // Sorted eigenvectors.
+    let v: Array2<f64> = v.permute_axis(Axis(0), &perm);
+    (w, v)
 }
+
 
 pub fn sort_vector<T: PartialOrd>(vs: &mut Vec<T>, ascending: bool) {
     if ascending {
@@ -119,7 +104,7 @@ pub fn print_davidson_init(max_iter: usize, nroots: usize, tolerance: f64) {
     info!("{: >4} {: <25}", nroots, " Roots will be computed.");
     info!("{:-^75} ", "");
     info!(
-        "{: <5} {: >12} {: >12} {: >18} {: >12}",
+        "{: <5}{: >15}{: >15}{: >15}{: >15}",
         "Iter.", "Roots conv.", "Roots left", "Total dev.", "Max dev."
     );
     info!("{:-^75} ", "");
@@ -127,7 +112,7 @@ pub fn print_davidson_init(max_iter: usize, nroots: usize, tolerance: f64) {
 
 pub fn print_davidson_iteration(iter: usize, roots_cvd: usize, roots_lft: usize, t_dev: f64, max_dev:f64) {
     info!(
-        "{: >5} {:>12} {:>12} {:>18.10e} {:>12.4}",
+        "{: >5}{:>15}{:>15}{:>15.8}{:>15.8}",
         iter + 1,
         roots_cvd,
         roots_lft,
@@ -155,7 +140,6 @@ pub fn print_davidson_end(result_is_ok: bool, time: Instant) {
 #[cfg(test)]
 mod test {
     use ndarray::prelude::*;
-    use std::f64;
 
     #[test]
     fn test_random_symmetric() {
