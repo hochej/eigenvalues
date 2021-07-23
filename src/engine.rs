@@ -33,7 +33,7 @@ impl<S> DavidsonEngine for ArrayBase<S, Ix2>
     }
 
     fn precondition(&self, r_k: ArrayView1<'_, f64>, w_k: f64) -> Array1<f64> {
-        &r_k / &(Array1::from_elem(self.nrows(), w_k) - &self.diag())
+        &r_k / &(Array1::from_elem(self.nrows(), w_k) - self.diag())
     }
 
     fn get_size(&self) -> usize {

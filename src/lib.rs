@@ -30,7 +30,6 @@ println!("eigenvectors:{}", eig.eigenvectors);
 
 
 */
-mod array_sort;
 pub mod engine;
 pub mod utils;
 mod davidson;

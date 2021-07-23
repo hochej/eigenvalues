@@ -41,12 +41,13 @@ pub struct Davidson {
 }
 
 impl Davidson {
-    /// The new static method takes the following arguments:
-    /// * `h` - A highly diagonal symmetric matrix
-    /// * `nvalues` - the number of eigenvalues/eigenvectors pair to compute
-    /// * `method` Either DPR or GJD
-    /// * `spectrum_target` Lowest or Highest part of the spectrum
-    /// * `tolerance` numerical tolerance.
+    /// Compute the lowest eigenvalues of a symmetric, diagonal dominant matrix.
+    /// * `engine` an object that implements the `DavidsonEngine` trait.
+    /// * `guess` the initial guess for the eigenvectors.
+    /// * `nvalues` - the number of eigenvalues/eigenvectors pair to compute.
+    /// * `n_roots` the number of (lowest) eigenvalues/eigenvectors to compute.
+    /// * `tolerance` numerical tolerance for convergence.
+    /// * `max_iter` the maximal number of iterations.
     pub fn new<D: DavidsonEngine>(
         engine: D,
         guess: Array2<f64>,
@@ -68,7 +69,7 @@ impl Davidson {
         let mut dim_sub: usize = dim_sub_origin;
 
         // The maximal possible subspace, before it will be collapsed.
-        let max_space: usize = 30;
+        let max_space: usize = 50;
 
         // The initial information of the Davidson routine are printed.
         utils::print_davidson_init(max_iter, n_roots, tolerance);
@@ -86,12 +87,8 @@ impl Davidson {
             let a_proj: Array2<f64> = guess.t().dot(&ax);
 
             // 2. Solve the eigenvalue problem for the subspace Hamiltonian.
+            // The eigenvalues (u) and eigenvectors (v) are already sorted in ascending order.
             let (u, v): (Array1<f64>, Array2<f64>) = a_proj.eigh(UPLO::Upper).unwrap();
-
-            // 2.1 The eigenvalues (u) and eigenvectors (v) are sorted in ascending order.
-            // TODO: Check if this is really necessary. The eigenvalues and eigenvectors should
-            // be already sorted in ascending order!
-            let (u, v): (Array1<f64>, Array2<f64>) = utils::sort_eigenpairs(u, v);
 
             // 3. Convergence checks are made.
             // 3.1 Compute the Ritz vectors.
@@ -101,11 +98,9 @@ impl Davidson {
             let rk: Array2<f64> = ax.dot(&v) - ritz.dot(&Array::from_diag(&u));
 
             // 3.3 Convergence check for each pair of eigenvalue and eigenvector.
-            let errors: Array1<f64> = Array::from_iter(
-                rk.slice(s![.., 0..n_roots])
+            let errors: Array1<f64> = rk.slice(s![.., 0..n_roots])
                     .axis_iter(Axis(1))
-                    .map(|col| col.norm()),
-            );
+                    .map(|col| col.norm()).collect();
 
             // The sum of all errors.
             let error: f64 = errors.sum();
@@ -151,7 +146,7 @@ impl Davidson {
                 dim_sub += roots_lft;
 
                 // The new subspace vectors are orthonormalized and added to the existing basis.
-                guess.append(Axis(1), add_space.view());
+                guess.append(Axis(1), add_space.view()).unwrap();
                 guess = guess.qr().unwrap().0;
 
             }

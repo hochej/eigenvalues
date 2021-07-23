@@ -1,16 +1,11 @@
-mod array_sort;
-
 use eigenvalues::{Davidson, utils};
-use eigenvalues::utils::{generate_random_sparse_symmetric, sort_eigenpairs};
+use eigenvalues::utils::{generate_random_sparse_symmetric};
 use ndarray_linalg::*;
 use ndarray::prelude::*;
 use std::time::Instant;
 use log::LevelFilter;
 use std::io::Write;
 use env_logger::Builder;
-use ndarray_linalg::lobpcg::LobpcgResult;
-use eigenvalues::engine::DavidsonEngine;
-use ndarray::DataMut;
 
 fn main() {
     Builder::new()
@@ -31,7 +26,7 @@ fn main() {
 
     let guess: Array2<f64> = make_guess(matrix.diag(), 6);
     let n_roots: usize = 4;
-    let dav = Davidson::new(matrix.clone(), guess, n_roots, tolerance, 60).unwrap();
+    let dav = Davidson::new(matrix, guess, n_roots, tolerance, 60).unwrap();
 
     println!("Elapsed time for Davidson routine {}", dav_start.elapsed().as_secs_f32());
 
@@ -54,23 +49,3 @@ pub fn make_guess(diag: ArrayView1<f64>, dim: usize) -> Array2<f64> {
     mtx
 }
 
-
-
-fn do_lobpcg(matrix: ArrayView2<f64>) -> () {
-    let x:Array2<f64> = ndarray_linalg::generate::random((matrix.dim().0,8));
-    let result = lobpcg::lobpcg(|y| matrix.dot(&y),x,|_| {},None,1e-9,600,lobpcg::TruncatedOrder::Smallest);
-    match result {
-        LobpcgResult::Ok(vals, _, r_norms) | LobpcgResult::Err(vals, _, r_norms, _) => {
-            // check convergence
-            for (i, norm) in r_norms.into_iter().enumerate() {
-                if norm > 1e-5 {
-                    println!("==== Assertion Failed ====");
-                    println!("The {}th eigenvalue estimation did not converge!", i);
-                    panic!("Too large deviation of residual norm: {} > 0.01", norm);
-                }
-            }
-            println!("eigenvalues {}",vals.mapv(f64::sqrt));
-        }
-        LobpcgResult::NoResult(err) => panic!("Did not converge: {:?}", err),
-    }
-}

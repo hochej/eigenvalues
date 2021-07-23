@@ -13,7 +13,7 @@ of a symmetric matrix **H**, implemented in [Rust](https://www.rust-lang.org/).
 The library examples represent **H** using the ndarray::ArrayBase type, but the matrix **H** does not need to be dense. Sparse or other representations are handled by implementing the `Matrixoperations` trait.
 
 ## Available Algorithms:
- * **Davidson** using either  Diagonal-Preconditioned-Residue (**DPR**) or Generalized Jacobi Davidson (**GJD**). See [Davidson Diagonalization Method](https://www.semanticscholar.org/paper/DAVIDSON-DIAGONALIZATION-METHOD-AND-ITS-APPLICATION-Liao/5811eaf768d1a006f505dfe24f329874a679ba59)
+ * **Davidson** See [Davidson Diagonalization Method](https://www.semanticscholar.org/paper/DAVIDSON-DIAGONALIZATION-METHOD-AND-ITS-APPLICATION-Liao/5811eaf768d1a006f505dfe24f329874a679ba59)
 
 
 ### Note:

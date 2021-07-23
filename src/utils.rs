@@ -9,7 +9,6 @@ use ndarray_linalg::generate::random;
 use log::info;
 use std::time::Instant;
 use std::cmp::Ordering;
-use crate::array_sort::*;
 use approx::relative_eq;
 
 
@@ -41,21 +40,6 @@ pub fn generate_random_sparse_symmetric(dim: usize, lim: usize, sparsity: f64) -
     };
     Array::from_shape_fn((dim, dim), lambda)
 }
-
-/// Sort the eigenvalues and their corresponding eigenvectors in ascending order
-pub fn sort_eigenpairs(
-    w: Array1<f64>, // eigenvalues
-    v: Array2<f64>, // eigenvectors
-) -> (Array1<f64>, Array2<f64>) {
-    // Create the permutation array.
-    let perm: Permutation = w.sort_axis_by(Axis(0), |i, j| w[i] < w[j]);
-    // Sorted eigenvalues.
-    let w: Array1<f64> = w.permute_axis(Axis(0), &perm);
-    // Sorted eigenvectors.
-    let v: Array2<f64> = v.permute_axis(Axis(0), &perm);
-    (w, v)
-}
-
 
 pub fn sort_vector<T: PartialOrd>(vs: &mut Vec<T>, ascending: bool) {
     if ascending {
