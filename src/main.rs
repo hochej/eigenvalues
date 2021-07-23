@@ -1,5 +1,5 @@
 use eigenvalues::{Davidson, utils};
-use eigenvalues::utils::{generate_random_sparse_symmetric};
+use eigenvalues::utils::generate_diagonal_dominant;
 use ndarray_linalg::*;
 use ndarray::prelude::*;
 use std::time::Instant;
@@ -13,7 +13,7 @@ fn main() {
         .filter(None, LevelFilter::Info)
         .init();
 
-    let matrix = generate_random_sparse_symmetric(2000, 10, 0.005);
+    let matrix = generate_diagonal_dominant(2000, 0.005);
 
     let tolerance = 1e-6;
     let eigh_start = Instant::now();
@@ -37,8 +37,7 @@ fn main() {
 
 
 }
-
-pub fn make_guess(diag: ArrayView1<f64>, dim: usize) -> Array2<f64> {
+fn make_guess(diag: ArrayView1<f64>, dim: usize) -> Array2<f64> {
     let order: Vec<usize> = utils::argsort(diag.view());
     let mut mtx: Array2<f64> = Array2::zeros([diag.len(), dim]);
     for (idx, i) in order.into_iter().enumerate() {

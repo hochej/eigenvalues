@@ -28,19 +28,6 @@ pub fn generate_random_symmetric(dim: usize, magnitude: f64) -> Array2<f64> {
     arr.dot(&arr.t())
 }
 
-/// Random Sparse matrix
-pub fn generate_random_sparse_symmetric(dim: usize, lim: usize, sparsity: f64) -> Array2<f64> {
-    let arr = generate_diagonal_dominant(dim, sparsity);
-    let lambda = |(i, j)| {
-        if j > i + lim && i > j + lim {
-            0.0
-        } else {
-            arr[[i, j]]
-        }
-    };
-    Array::from_shape_fn((dim, dim), lambda)
-}
-
 pub fn sort_vector<T: PartialOrd>(vs: &mut Vec<T>, ascending: bool) {
     if ascending {
         vs.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());

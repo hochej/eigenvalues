@@ -179,17 +179,3 @@ impl Davidson {
         }
     }
 }
-
-#[cfg(test)]
-mod test {
-    use ndarray::prelude::*;
-
-    #[test]
-    fn test_update_subspace() {
-        let mut arr = Array2::from_elem((3, 3), 1.);
-        let brr = Array::zeros([3, 2]);
-        super::update_subspace(arr.view_mut(), brr.view(), (0, 2));
-        assert_eq!(arr.column(1).sum(), 0.);
-        assert_eq!(arr.column(2).sum(), 3.);
-    }
-}

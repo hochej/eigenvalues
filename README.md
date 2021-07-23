@@ -6,15 +6,12 @@
 
 Eigenvalue Decomposition
 ========================
-This package contains some iterative algorithms for computing the eigenvalues/eigenvectors 
-of a symmetric matrix **H**, implemented in [Rust](https://www.rust-lang.org/).
+This package contains the [iterative Davidson algorithm](https://www.semanticscholar.org/paper/DAVIDSON-DIAGONALIZATION-METHOD-AND-ITS-APPLICATION-Liao/5811eaf768d1a006f505dfe24f329874a679ba59) for computing the lowest few eigenvalues/eigenvectors 
+of a symmetric matrix **A**, implemented in [Rust](https://www.rust-lang.org/).
 
 ## Matrix Representation
-The library examples represent **H** using the ndarray::ArrayBase type, but the matrix **H** does not need to be dense. Sparse or other representations are handled by implementing the `Matrixoperations` trait.
-
-## Available Algorithms:
- * **Davidson** See [Davidson Diagonalization Method](https://www.semanticscholar.org/paper/DAVIDSON-DIAGONALIZATION-METHOD-AND-ITS-APPLICATION-Liao/5811eaf768d1a006f505dfe24f329874a679ba59)
-
+The library examples represent **A** using the [ndarray::ArrayBase](https://docs.rs/ndarray/0.15.3/ndarray/struct.ArrayBase.html) 
+type, but the matrix **A** does not need to be dense. Sparse or other representations are handled by implementing the `DavidsonEngine` trait.
 
 ### Note:
 The Davidson method is suitable for **diagonal-dominant symmetric matrices** that are quite common

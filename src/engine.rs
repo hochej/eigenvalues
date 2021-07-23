@@ -1,5 +1,5 @@
 use ndarray::prelude::*;
-use ndarray::DataMut;
+use ndarray::Data;
 
 /// Abstract Trait defining the API required by solver engines.
 ///
@@ -26,7 +26,7 @@ pub trait DavidsonEngine {
 
 impl<S> DavidsonEngine for ArrayBase<S, Ix2>
     where
-        S: DataMut<Elem = f64>,
+        S: Data<Elem = f64>,
 {
     fn compute_products(&self, x: ArrayView2<'_, f64>) -> Array2<f64> {
         self.dot(&x)
